@@ -1,0 +1,136 @@
+version: '3.7'
+
+# ====================================== AIRFLOW ENVIRONMENT VARIABLES =======================================
+x-environment: &airflow_environment
+  - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+  - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+  - AIRFLOW__CORE__FERNET_KEY=hCRoPUYBO27QiEg1MRu5hSjLG7yNd8y8XKlm-8kRlkQ=
+  - AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS=False
+  - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql://airflow:airflow@postgres:5432/airflow
+  - AIRFLOW__CORE__STORE_DAG_CODE=True
+  - AIRFLOW__CORE__STORE_SERIALIZED_DAGS=True
+  - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+  - AIRFLOW_CONN_S3=s3://@?host=http://minio:9000&aws_access_key_id=AKIAIOSFODNN7EXAMPLE&aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+x-airflow-image: &airflow_image apache/airflow:2.2.5-python3.8
+# ====================================== /AIRFLOW ENVIRONMENT VARIABLES ======================================
+
+services:
+  postgres:
+    image: postgres:12-alpine
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    ports:
+      - "5432:5432"
+
+  initdb_adduser:
+    build:
+      context: ./services/airflow
+      args:
+        AIRFLOW_BASE_IMAGE: *airflow_image
+    depends_on:
+      - postgres
+    environment: *airflow_environment
+    entrypoint: /bin/bash
+    command: -c 'airflow db init && airflow users create --username admin --password admin --firstname Anonymous --lastname Admin --role Admin --email admin@example.org'
+
+  webserver:
+    build:
+      context: ./services/airflow
+      args:
+        AIRFLOW_BASE_IMAGE: *airflow_image
+    restart: always
+    depends_on:
+      - postgres
+    volumes:
+      - logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    environment: *airflow_environment
+    command: webserver
+
+  scheduler:
+    build:
+      context: ./services/airflow
+      args:
+        AIRFLOW_BASE_IMAGE: *airflow_image
+    restart: always
+    depends_on:
+      - postgres
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - logs:/opt/airflow/logs
+    environment: *airflow_environment
+    entrypoint: ["/bin/sh"]
+    command: ["-c", "airflow scheduler"]
+
+  spark:
+    image: docker.io/bitnami/spark:3.2.1
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    volumes:
+      - ./spark/app:/usr/local/spark/app # Spark scripts folder (Must be the same path in airflow and Spark Cluster)
+      - ./spark/resources:/usr/local/spark/resources #Resources folder (Must be the same path in airflow and Spark Cluster)
+    ports:
+      - '8081:8080'
+
+  spark-worker:
+    image: docker.io/bitnami/spark:3.2.1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark:7077
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+
+  zeppelin:
+    build:
+      context: ./services/zeppelin
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./notebook:/opt/zeppelin/notebook
+    depends_on:
+      - spark
+    environment:
+      - SPARK_MASTER=spark://spark:7077
+      - SPARK_HOME=/spark
+
+  minio:
+    image: minio/minio:RELEASE.2020-06-22T03-12-50Z
+    volumes:
+      - s3:/data
+    ports:
+      - "9000:9000"
+    command: server /data
+    environment:
+      MINIO_ACCESS_KEY: AKIAIOSFODNN7EXAMPLE
+      MINIO_SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+  minio_init:
+    image: minio/mc:RELEASE.2020-06-20T00-18-43Z
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      while ! nc -z minio 9000; do echo 'Waiting 1 sec for MinIO to be healthy...' && sleep 1; done;
+      echo 'MinIO is available.';
+      while ! /usr/bin/mc config host add minio http://minio:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY; do echo 'MinIO not up and running yet...' && sleep 1; done;
+      echo 'Added mc host config.';
+      /usr/bin/mc mb minio/datalake;
+      exit 0;
+      "
+
+volumes:
+  logs:
+  s3:
