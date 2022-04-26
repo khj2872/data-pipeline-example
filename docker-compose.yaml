@@ -46,11 +46,24 @@ services:
     depends_on:
       - postgres
     volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark/app:/usr/local/spark/app
       - logs:/opt/airflow/logs
     ports:
-      - "8080:8080"
+      - "18080:8080"
     environment: *airflow_environment
     command: webserver
+
+  add_connection:
+    build:
+      context: ./services/airflow
+      args:
+        AIRFLOW_BASE_IMAGE: *airflow_image
+    depends_on:
+      - webserver
+    environment: *airflow_environment
+    entrypoint: /bin/bash
+    command: -c 'airflow connections add --conn-host spark://spark-master --conn-port 7077 --conn-type Spark spark_local'
 
   scheduler:
     build:
@@ -62,36 +75,55 @@ services:
       - postgres
     volumes:
       - ./dags:/opt/airflow/dags
+      - ./spark/app:/usr/local/spark/app
       - logs:/opt/airflow/logs
     environment: *airflow_environment
     entrypoint: ["/bin/sh"]
     command: ["-c", "airflow scheduler"]
 
-  spark:
-    image: docker.io/bitnami/spark:3.2.1
-    environment:
-      - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+  hadoop-namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     volumes:
-      - ./spark/app:/usr/local/spark/app # Spark scripts folder (Must be the same path in airflow and Spark Cluster)
-      - ./spark/resources:/usr/local/spark/resources #Resources folder (Must be the same path in airflow and Spark Cluster)
+      - ./data/namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=datalake
+    env_file:
+      - ./hadoop.env
+
+  hadoop-datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    depends_on:
+      - hadoop-namenode
+    volumes:
+      - ./data/datanode:/hadoop/dfs/data
+    env_file:
+      - ./hadoop.env
+
+  hadoop-datanode-init:
+    build:
+      context: ./services/hadoop
+    depends_on:
+      - hadoop-datanode
+    env_file:
+      - ./hadoop.env
+
+  spark-master:
+    image: bde2020/spark-master:3.2.0-hadoop3.2
+#    container_name: spark-master
     ports:
-      - '8081:8080'
+      - "8081:8080"
+      - "7077:7077"
+    env_file:
+      - ./hadoop.env
 
   spark-worker:
-    image: docker.io/bitnami/spark:3.2.1
+    image: bde2020/spark-worker:3.2.0-hadoop3.2
+    depends_on:
+      - spark-master
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark:7077
-      - SPARK_WORKER_MEMORY=1G
-      - SPARK_WORKER_CORES=2
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+      - SPARK_MASTER=spark://spark-master:7077
+    env_file:
+      - ./hadoop.env
 
   zeppelin:
     build:
@@ -103,33 +135,8 @@ services:
     depends_on:
       - spark
     environment:
-      - SPARK_MASTER=spark://spark:7077
+      - SPARK_MASTER=spark://spark-master:7077
       - SPARK_HOME=/spark
-
-  minio:
-    image: minio/minio:RELEASE.2020-06-22T03-12-50Z
-    volumes:
-      - s3:/data
-    ports:
-      - "9000:9000"
-    command: server /data
-    environment:
-      MINIO_ACCESS_KEY: AKIAIOSFODNN7EXAMPLE
-      MINIO_SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-
-  minio_init:
-    image: minio/mc:RELEASE.2020-06-20T00-18-43Z
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      while ! nc -z minio 9000; do echo 'Waiting 1 sec for MinIO to be healthy...' && sleep 1; done;
-      echo 'MinIO is available.';
-      while ! /usr/bin/mc config host add minio http://minio:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY; do echo 'MinIO not up and running yet...' && sleep 1; done;
-      echo 'Added mc host config.';
-      /usr/bin/mc mb minio/datalake;
-      exit 0;
-      "
 
 volumes:
   logs:

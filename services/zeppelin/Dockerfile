@@ -10,21 +10,9 @@ RUN apt-get update &&  apt-get install -y curl unzip wget grep sed vim tzdata &&
     && tar -xvzf spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz \
     && mv spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION} /spark \
     && rm spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz \
-#    && wget https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/$HADOOP_AWS_VERSION/hadoop-aws-$HADOOP_AWS_VERSION.jar \
-#    && mv hadoop-aws-$HADOOP_AWS_VERSION.jar spark/jars \
-#    && wget https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.655/aws-java-sdk-bundle-1.11.655.jar \
-#    && mv aws-java-sdk-bundle-1.11.655.jar spark/jars \
-#    && wget https://repo1.maven.org/maven2/com/google/guava/guava/27.0-jre/guava-27.0-jre.jar \
-#    && mv guava-27.0-jre.jar spark/jars \
-#    && rm spark/jars/guava-14.0.1.jar \
     && cd /
 
 RUN pip install --user --no-cache-dir \
     jupyter \
     grpcio \
-    protobuf
-
-#COPY docker/zeppelin/airline-notebooks /opt/zeppelin/notebook/airline-notebooks
-#RUN chmod -R 777 /opt/zeppelin/notebook/airline-notebooks/
-
-#USER 1000
+    protobuf;
