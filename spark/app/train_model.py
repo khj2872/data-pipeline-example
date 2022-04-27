@@ -11,7 +11,7 @@ spark = SparkSession.builder.appName("taxi-fare-prediciton")\
 hdfs_namenode = "hadoop-namenode:8020"
 
 train_df = spark.read.parquet(f"hdfs://{hdfs_namenode}/data/parquet/tripdata/train/")
-test_df = spark.read.parquet(f"hdfs://{hdfs_namenode}/data/parquet/tripdata/train/")
+test_df = spark.read.parquet(f"hdfs://{hdfs_namenode}/data/parquet/tripdata/test/")
 
 vassembler = VectorAssembler(inputCols=["trip_distance"], outputCol="features")
 vtrain_df = vassembler.transform(train_df)
