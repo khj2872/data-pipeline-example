@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Wait for the postgres docker to be running
+# Wait for the Hadoop Datanode docker to be running
 while ! nc -z hadoop-datanode 9864; do
   >&2 echo "Datanode is unavailable - sleeping"
   sleep 3
